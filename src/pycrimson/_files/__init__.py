@@ -7,6 +7,8 @@ from ._pamt import (
 from ._papgt import PackGroupTreeMeta
 from ._pathc import PackTextureHeaderCollection
 from ._save import SaveFile
+from ._binarystring import StringBinary
+from ._paloc import LocalizationStrings
 
 __all__ = [
     "PackMeta",
@@ -16,4 +18,6 @@ __all__ = [
     "PackGroupTreeMeta",
     "PackTextureHeaderCollection",
     "SaveFile",
+    "StringBinary",
+    "LocalizationStrings",
 ]

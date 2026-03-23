@@ -1,6 +1,7 @@
 import sys
 import tqdm
 import json
+import pickle
 
 from typing import Callable
 from pathlib import Path
@@ -126,19 +127,34 @@ def extract_pack_files(
     output_path: Annotated[Path, Parameter(validator=validators.Path(file_okay=False))],
     only_extension: str | None = None,
     only_encrypted: bool = False,
+    only_folder: str | None = None,
+    cache_path: Annotated[
+        Path | None, Parameter(validator=validators.Path(dir_okay=False))
+    ] = None,
 ):
     output_path.mkdir(parents=True, exist_ok=True)
 
     if only_extension is not None and not only_extension.startswith("."):
         only_extension = f".{only_extension}"
 
-    context = PackageContext(pack_path)
+    if cache_path is not None and cache_path.exists():
+        with cache_path.open("rb") as f:
+            context: PackageContext = pickle.load(f)
+    else:
+        context = PackageContext(pack_path)
+
+        if cache_path is not None:
+            with cache_path.open("wb") as f:
+                pickle.dump(context, f)
 
     def _filter(path: str, entry: PackMetaFileEntry):
         if only_extension is not None and not path.endswith(only_extension):
             return False
 
         if only_encrypted and entry.flags.crypto == PackMetaFileCrypto.NONE:
+            return False
+
+        if only_folder is not None and not path.startswith(only_folder):
             return False
 
         return True
