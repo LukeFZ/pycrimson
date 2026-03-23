@@ -23,9 +23,7 @@ class TransferInstructionFlags(u32, Flag):
     VALIDATED_MB = 1 << 5
     UNKNOWN_6 = 1 << 6
     UNKNOWN_7 = 1 << 7
-    # UNKNOWN_8 = 1 << 8
     UNKNOWN_9 = 1 << 9
-    # UNKNOWN_10 = 1 << 10
     UNKNOWN_11 = 1 << 11
     VECTOR = 1 << 12
     UNKNOWN_14 = 1 << 14
@@ -77,7 +75,6 @@ class ReflectionPropertyType(u16, Enum):
     OPTIONAL_OBJECT = 5
     OBJECT_ARRAY = 6
     OBJECT_PTR_ARRAY = 7
-    UNKNOWN_8 = 8
     SIZE_PREFIXED_ARRAY = 10
 
     def is_array_type(self):

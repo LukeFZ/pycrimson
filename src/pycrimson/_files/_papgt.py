@@ -69,12 +69,11 @@ class PackGroupTreeMeta:
             group_names_length = entry_reader.read_i32_le()
             group_names_buffer = entry_reader.read_bytes(group_names_length)
 
-            for entry in entries:
-                group_name_buf = group_names_buffer[entry.group_name_offset :]
-                group_name = group_name_buf[: group_name_buf.index(b"\x00")].decode(
-                    "utf-8"
-                )
-                self._entries[group_name] = entry
+            with EndianedBytesIO(group_names_buffer) as group_names_reader:
+                for entry in entries:
+                    group_names_reader.seek(entry.group_name_offset)
+                    group_name = group_names_reader.read_cstring()
+                    self._entries[group_name] = entry
 
     @classmethod
     def from_file(cls, path: Path):
