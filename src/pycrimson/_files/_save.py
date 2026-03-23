@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from enum import Flag
+from typing import ClassVar
 
 from bier.serialization import BinarySerializable, u16, u32, custom, static_length
 from bier.EndianedBinaryIO import (
@@ -34,8 +35,12 @@ class SaveFileHeader(BinarySerializable):
 
 
 class SaveFile:
+    DEFAULT_VERSION: ClassVar[int] = 2
+
     @staticmethod
-    def write_encrypted(data: bytes, writer: EndianedWriterIOBase, version: int = 2):
+    def write_encrypted(
+        data: bytes, writer: EndianedWriterIOBase, version: int = DEFAULT_VERSION
+    ):
         compressed_save = lz4.block.compress(data, store_size=False)
 
         hmac, nonce, encrypted_save = _crypto.chacha20_encrypt_save_file(
@@ -60,7 +65,9 @@ class SaveFile:
         writer.write(encrypted_save)
 
     @staticmethod
-    def write_encrypted_file(data: bytes, output_path: Path, version: int):
+    def write_encrypted_file(
+        data: bytes, output_path: Path, version: int = DEFAULT_VERSION
+    ):
         with EndianedFileIO(output_path, "wb") as writer:
             SaveFile.write_encrypted(data, writer, version)
 

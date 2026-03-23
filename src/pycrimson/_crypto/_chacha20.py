@@ -41,7 +41,7 @@ def chacha20_decrypt_pack_entry(
 
 
 # The key material is originally 32 bytes, but the last one gets overwritten by a null byte
-# (for some reason)
+# (they probably used a string type)
 _SAVE_BASE_KEY = bytes.fromhex(
     "C41B8E730DF259A637CC04E9B12F9668DA107A853E61F9224DB80AD75C13EF90"
 )[:31]

@@ -1,4 +1,4 @@
-Some information about all of the different filetypes in the game:
+Some personal notes about all of the different filetypes in the game:
 
 hkx (havoc)  
 pam  
