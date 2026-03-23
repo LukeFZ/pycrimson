@@ -20,9 +20,11 @@ from . import _converters
 @dataclass(slots=True)
 class ReflectionParser:
     _reader: EndianedReaderIOBase
+    _base_reader_offset: int
+
     _header: ReflectionHeader
     _types: list[ReflectionType]
-    _entry2: list[str]
+    _object_names: list[str]
     _object_infos: list[ReflectionObjectInfo]
     _opt_entries: list[ReflectionOptional]
 
@@ -30,10 +32,16 @@ class ReflectionParser:
 
     _enable_debug_logging: bool
 
-    def __init__(self, reader: EndianedReaderIOBase, has_opt_entry: bool = False):
-        self._enable_debug_logging = False
+    def __init__(
+        self,
+        reader: EndianedReaderIOBase,
+        has_opt_entry: bool = False,
+        enable_debug_logging: bool = False,
+    ):
+        self._enable_debug_logging = enable_debug_logging
 
         self._reader = reader
+        self._base_reader_offset = reader.tell()
         self._header = ReflectionHeader.read_from(reader)
 
         context = SerializationContext(
@@ -48,7 +56,7 @@ class ReflectionParser:
             for _ in range(self._header.type_count)
         ]
 
-        self._entry2 = (
+        self._object_names = (
             [reader.read_string(reader.read_u32()) for _ in range(reader.read_u32())]
             if self._header.serialization_version > 0xD
             else []
@@ -69,23 +77,25 @@ class ReflectionParser:
         if self._enable_debug_logging:
             print("end offset:", end_offset)
 
-        if object_count > 0 and self._header.metadata_version >= 3:
+        if self._header.metadata_version >= 3:
             self._object_infos = [
                 ReflectionObjectInfo.read_from(reader, context)
                 for _ in range(object_count)
             ]
+        else:
+            assert False, "todo: parsing without explicit object infos"
 
         self.objects = []
         for i, obj in enumerate(self._object_infos):
-            assert reader.tell() == obj.offset, (
-                f"{hex(reader.tell())} vs. {hex(obj.offset)}"
+            absolute_object_offset = obj.offset + self._base_reader_offset
+            assert reader.tell() == absolute_object_offset, (
+                f"{hex(reader.tell())} vs. {hex(absolute_object_offset)}"
             )
 
             if self._enable_debug_logging:
                 print("parsing obj at idx", i)
 
-            bitmap, obj_type, has_metadata = self._read_object_metadata(i, False, False)
-            parsed_obj = self._parse_object(bitmap, obj_type, has_metadata)
+            parsed_obj = self._parse_object(*self._read_object_metadata(i, False))
             self.objects.append(parsed_obj)
 
     def print_all_types(self):
@@ -97,11 +107,15 @@ class ReflectionParser:
                 )
 
     def _parse_object(
-        self, bitmap: bytes, type_info: ReflectionType, has_metadata: bool
+        self,
+        bitmap: bytes,
+        type_info: ReflectionType,
+        has_metadata: bool,
+        object_name: str | None,
     ) -> dict:
         if self._enable_debug_logging:
             print(
-                f"parsing object @ {hex(self._reader.tell())} : {type_info.name} ({bitmap})"
+                f"parsing object @ {hex(self._reader.tell())} '{f'{object_name or ""}'}' : {type_info.name} ({bitmap})"
             )
             for prop in type_info.properties:
                 print("\t", prop)
@@ -114,6 +128,8 @@ class ReflectionParser:
         obj: dict = {
             "__pycr_type__": type_info.name,
         }
+        if object_name is not None:
+            obj["__pycr_name__"] = object_name
 
         no_tags = False
         if self._header.serialization_version >= 5:
@@ -186,22 +202,12 @@ class ReflectionParser:
                     property.type_name, self._reader.read_bytes(property.fixed_size)
                 )
             case ReflectionPropertyType.OBJECT:
-                object_property_bitmap, object_type, object_has_metadata = (
-                    self._read_object_metadata(None, False, False)
-                )
-                return self._parse_object(
-                    object_property_bitmap, object_type, object_has_metadata
-                )
+                return self._parse_object(*self._read_object_metadata(None, False))
             case ReflectionPropertyType.OPTIONAL_OBJECT:
                 if self._reader.read_u8() == 0:
                     return None
 
-                object_property_bitmap, object_type, object_has_metadata = (
-                    self._read_object_metadata(None, False, False)
-                )
-                return self._parse_object(
-                    object_property_bitmap, object_type, object_has_metadata
-                )
+                return self._parse_object(*self._read_object_metadata(None, False))
             case ReflectionPropertyType.SIMPLE_ARRAY:
                 return [
                     _converters.get_converted_value(
@@ -215,9 +221,9 @@ class ReflectionParser:
             ):
                 array_count = self._reader.read_u32()
 
-                has_entry2_index = False
+                has_named_objects = False
                 if self._header.serialization_version >= 0xE:
-                    has_entry2_index = self._reader.read_u8() == 1
+                    has_named_objects = self._reader.read_u8() == 1
 
                 unknown0 = 0
                 if self._header.serialization_version >= 0xB:
@@ -240,19 +246,23 @@ class ReflectionParser:
                                 unknown_list_0,
                             )
 
-                        if has_entry2_index:
-                            unknown_list_1 = self._reader.read_i32_array(unk_count)
-                            if self._enable_debug_logging:
-                                print("unknown list 2:", unknown_list_1)
+                        if has_named_objects:
+                            object_name_indices = self._reader.read_i32_array(unk_count)
+                            if self._enable_debug_logging or True:
+                                print(
+                                    "unknown list object names:",
+                                    [
+                                        self._object_names[x]
+                                        for x in object_name_indices
+                                    ],
+                                    unknown_list_0,
+                                )
 
                 value = []
                 for _ in range(array_count):
-                    object_property_bitmap, object_type, object_has_metadata = (
-                        self._read_object_metadata(None, has_entry2_index, False)
-                    )
                     value.append(
                         self._parse_object(
-                            object_property_bitmap, object_type, object_has_metadata
+                            *self._read_object_metadata(None, has_named_objects)
                         )
                     )
 
@@ -271,43 +281,61 @@ class ReflectionParser:
                 assert False, property
 
     def _read_object_metadata(
-        self, index: int | None, has_entry2_index: bool, unknown_2: bool
-    ) -> tuple[bytes, ReflectionType, bool]:
+        self, index: int | None, has_object_name_index: bool
+    ) -> tuple[bytes, ReflectionType, bool, str | None]:
         type_index = 0
         if index is None or self._header.metadata_version < 3:
             has_metadata = True
         else:
             obj_meta = self._object_infos[index]
             type_index = obj_meta.type_index
-            self._reader.seek(obj_meta.offset)
+            self._reader.seek(self._base_reader_offset + obj_meta.offset)
             has_metadata = False
 
         object_property_bitmap = self._reader.read_bytes(self._reader.read_u16())
+        object_name = None
+
         if has_metadata:
             type_index = self._reader.read_u16()
             if self._header.serialization_version >= 3:
                 if self._header.serialization_version >= 0xB:
-                    _ = self._reader.read_u8()  # unknown0
-                    _ = self._reader.read_u64()  # unknown1
-                    if has_entry2_index and self._header.serialization_version >= 0xE:
-                        entry2_index = self._reader.read_u32()  # entry2_index
-                        if self._enable_debug_logging:
-                            print("object entry2 val:", self._entry2[entry2_index])
-                            assert False
+                    unknown1 = self._reader.read_u8() == 1
+                    if self._enable_debug_logging:
+                        print(
+                            "object meta unknown1 (maybe is static object?):", unknown1
+                        )
 
-                        assert not unknown_2
+                    unknown0 = self._reader.read_i64()
+
+                    if self._header.serialization_version >= 0xE:
+                        if has_object_name_index:
+                            object_name_index = self._reader.read_i32()
+                            assert object_name_index >= 0, object_name_index
+
+                            object_name = self._object_names[object_name_index]
+                            if self._enable_debug_logging:
+                                print("object name:", object_name)
+
                 else:
-                    if self._header.serialization_version < 8:
-                        _ = self._reader.read_u16()
+                    if self._header.serialization_version >= 8:
+                        unknown0 = self._reader.read_i32()
                     else:
-                        _ = self._reader.read_u32()
+                        unknown0 = self._reader.read_i16()
+
+                if self._enable_debug_logging:
+                    print("object meta unknown0:", unknown0)
 
             value_offset = self._reader.read_u32()
-            self._reader.seek(value_offset)
+            self._reader.seek(self._base_reader_offset + value_offset)
 
-        return object_property_bitmap, self._types[type_index], has_metadata
+        return (
+            object_property_bitmap,
+            self._types[type_index],
+            has_metadata,
+            object_name,
+        )
 
     @classmethod
-    def from_file(cls, path: Path):
+    def from_file(cls, path: Path, enable_debug_logging: bool = False):
         with EndianedFileIO(path, "rb") as f:
-            return cls(f)
+            return cls(f, enable_debug_logging=enable_debug_logging)
