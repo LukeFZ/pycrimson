@@ -35,3 +35,7 @@ uv tool install git+https://github.com/LukeFZ/pycrimson
 ## License
 
 `pycrimson` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
+
+## Acknowledgements
+
+- [Samboy063](https://github.com/SamboyCoding) for listening to me rant about the formats for hours on end and helping with some of the struct definitions. 

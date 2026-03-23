@@ -248,7 +248,7 @@ class ReflectionParser:
 
                         if has_named_objects:
                             object_name_indices = self._reader.read_i32_array(unk_count)
-                            if self._enable_debug_logging or True:
+                            if self._enable_debug_logging:
                                 print(
                                     "unknown list object names:",
                                     [
