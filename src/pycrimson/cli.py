@@ -163,7 +163,7 @@ def decrypt_save(
     ],
     output_path: Annotated[
         Path | None, Parameter(validator=validators.Path(dir_okay=False))
-    ],
+    ] = None,
 ):
     if output_path is None:
         output_path = save_path.with_suffix(".save_dec")
@@ -178,7 +178,7 @@ def encrypt_save(
     ],
     output_path: Annotated[
         Path | None, Parameter(validator=validators.Path(dir_okay=False))
-    ],
+    ] = None,
 ):
     if output_path is None:
         output_path = save_path.with_suffix(".save")
@@ -193,7 +193,7 @@ def parse_serialized_file(
     ],
     output_path: Annotated[
         Path | None, Parameter(validator=validators.Path(dir_okay=False))
-    ],
+    ] = None,
     enable_debug_logging: bool = False,
 ):
     if output_path is None:

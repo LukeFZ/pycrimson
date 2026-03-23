@@ -65,10 +65,10 @@ def chacha20_decrypt_save_file(
 ) -> bytes:
     key = _generate_save_key(version)
 
-    decrypted = _chacha20_decrypt(key, nonce, data)
+    decrypted = _chacha20_decrypt(data, key, nonce)
 
     hmac = HMAC(key, SHA256())
-    hmac.update(data)
+    hmac.update(decrypted)
     hmac.verify(hmac_signature)
 
     return decrypted
