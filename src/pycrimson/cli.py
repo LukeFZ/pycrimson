@@ -16,7 +16,7 @@ from ._context import PackageContext
 from ._files import (
     PackMetaFileCrypto,
     PackMetaFileCompression,
-    PackMetaFileEntry,
+    PackMetaFile,
     SaveFile,
 )
 from ._reflection import ReflectionParser
@@ -29,11 +29,11 @@ traceback.install(console=_error_console)
 def _extract_all_files(
     ctx: PackageContext,
     output_path: Path,
-    filter: Callable[[str, PackMetaFileEntry], bool] | None = None,
+    filter: Callable[[str, PackMetaFile], bool] | None = None,
 ):
     output_path.mkdir(parents=True, exist_ok=True)
 
-    all_entries: list[tuple[str, PackMetaFileEntry]] = []
+    all_entries: list[tuple[str, PackMetaFile]] = []
     for x in ctx._packs.values():
         for dir_path, y in x.directories.items():
             any_matched = False
@@ -84,7 +84,7 @@ def _list_all_files(ctx: PackageContext):
 def _extract_prefabs(
     ctx: PackageContext, output_path: Path, write_to_disk: bool, overwrite: bool
 ):
-    all_entries: list[tuple[str, PackMetaFileEntry]] = []
+    all_entries: list[tuple[str, PackMetaFile]] = []
     for x in ctx._packs.values():
         for dir_path, y in x.directories.items():
             any_matched = False
@@ -147,7 +147,7 @@ def extract_pack_files(
             with cache_path.open("wb") as f:
                 pickle.dump(context, f)
 
-    def _filter(path: str, entry: PackMetaFileEntry):
+    def _filter(path: str, entry: PackMetaFile):
         if only_extension is not None and not path.endswith(only_extension):
             return False
 

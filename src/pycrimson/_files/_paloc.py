@@ -5,6 +5,8 @@ from typing import ClassVar
 
 from .. import _crypto
 
+import io
+
 
 @dataclass(slots=True)
 class LocalizationStrings:
@@ -13,7 +15,7 @@ class LocalizationStrings:
     values: dict[int, str]
 
     def __init__(self, reader: EndianedReaderIOBase):
-        reader.seek(-4, 2)
+        reader.seek(-4, io.SEEK_END)
 
         count = reader.read_u32()
         reader.seek(0)

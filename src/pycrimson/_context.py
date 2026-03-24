@@ -5,7 +5,7 @@ from ._files import (
     PackTextureHeaderCollection,
     PackGroupTreeMeta,
     PackMeta,
-    PackMetaFileEntry,
+    PackMetaFile,
     PackMetaFileCompression,
     PackMetaFileCrypto,
 )
@@ -54,9 +54,7 @@ class PackageContext:
                     pack_meta = PackMeta.from_file(pamt_path, entry.pack_meta_checksum)
                     self._packs[name] = pack_meta
 
-    def _get_entry_by_path(
-        self, path: str
-    ) -> tuple[str, bytes, PackMetaFileEntry | None]:
+    def _get_entry_by_path(self, path: str) -> tuple[str, bytes, PackMetaFile | None]:
         dir_path, file_name = path.rsplit("/", 1)
 
         for group_id, pack in self._packs.items():

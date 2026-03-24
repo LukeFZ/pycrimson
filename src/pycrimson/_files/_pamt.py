@@ -32,17 +32,17 @@ class PackMetaHeader(BinarySerializable):
 
 
 @dataclass(frozen=True)
-class PackMetaEntry(BinarySerializable):
-    unknown0: u32
-    unknown1: u32
-    unknown2: u32
+class PackMetaChunk(BinarySerializable):
+    id: u32
+    checksum: u32
+    size: u32
 
 
 @dataclass(frozen=True)
-class PackMetaDirectoryEntry(BinarySerializable):
-    checksum: u32
+class PackMetaDirectory(BinarySerializable):
+    name_checksum: u32
     name_offset: i32
-    unknown2: u32
+    file_start_index: u32
     file_count: u32
 
 
@@ -83,7 +83,7 @@ class PackMetaFileFlags(BinarySerializable):
 
 
 @dataclass(frozen=True)
-class PackMetaFileEntry(BinarySerializable):
+class PackMetaFile(BinarySerializable):
     name_offset: u32
     chunk_offset: u32
     compressed_size: u32
@@ -130,23 +130,44 @@ class PackMeta:
     FILE_EXTENSION: ClassVar[str] = ".pamt"
 
     _header: PackMetaHeader
+    _chunks: dict[int, PackMetaChunk]
 
     _directory_names: TrieStringBuffer
     _file_names: TrieStringBuffer
 
-    directories: dict[str, dict[str, PackMetaFileEntry]]
+    directories: dict[str, dict[str, PackMetaFile]]
     encrypt_data: bytes
 
-    def __init__(self, reader: EndianedReaderIOBase, expected_crc: int):
+    def __init__(
+        self,
+        reader: EndianedReaderIOBase,
+        expected_crc: int,
+        pack_group_path: Path | None = None,
+    ):
         self._header = PackMetaHeader.read_from(reader)
         self.encrypt_data = self._header.encrypt_info.encrypt_info
+
+        assert self._header.unknown0 == 0, self._header
 
         data = reader.read()
         _crypto.validate_checksum(data, expected_crc)
 
         with EndianedBytesIO(data) as data_reader:
-            [PackMetaEntry.read_from(data_reader) for _ in range(self._header.count)]
-            # print(entries)
+            chunks = [
+                PackMetaChunk.read_from(data_reader) for _ in range(self._header.count)
+            ]
+
+            if pack_group_path is not None:
+                for chunk in chunks:
+                    chunk_path = pack_group_path / f"{chunk.id}.paz"
+                    assert chunk_path.exists(), chunk
+
+                    # the checks below are also needed, but are skipped for performance
+                    # chunk_data = chunk_path.read_bytes()
+                    # assert len(chunk_data) == chunk.size
+                    # assert _crypto.calculate_checksum(chunk_data) == chunk.checksum
+
+            self._chunks = {x.id: x for x in chunks}
 
             directory_name_buffer = data_reader.read_bytes(data_reader.read_u32_le())
             self._directory_names = TrieStringBuffer(directory_name_buffer)
@@ -155,28 +176,37 @@ class PackMeta:
             self._file_names = TrieStringBuffer(file_name_buffer)
 
             directories = [
-                PackMetaDirectoryEntry.read_from(data_reader)
+                PackMetaDirectory.read_from(data_reader)
                 for _ in range(data_reader.read_u32_le())
             ]
 
             files = [
-                PackMetaFileEntry.read_from(data_reader)
+                PackMetaFile.read_from(data_reader)
                 for _ in range(data_reader.read_u32_le())
             ]
 
             self.directories = {}
 
-            current_file_off = 0
             for directory in directories:
                 directory_files = files[
-                    current_file_off : current_file_off + directory.file_count
+                    directory.file_start_index : directory.file_start_index
+                    + directory.file_count
                 ]
-                current_file_off += directory.file_count
 
                 directory_path = self._directory_names.get_string(directory.name_offset)
+                assert (
+                    _crypto.calculate_checksum(directory_path)
+                    == directory.name_checksum
+                )
 
                 files_in_directory = {}
                 for file in directory_files:
+                    assert file.unknown0 == 0, file
+                    assert file.chunk_id in self._chunks, file
+                    assert self._chunks[file.chunk_id].size >= (
+                        file.chunk_offset + file.compressed_size
+                    ), file
+
                     file_name = self._file_names.get_string(file.name_offset)
                     files_in_directory[file_name] = file
 
