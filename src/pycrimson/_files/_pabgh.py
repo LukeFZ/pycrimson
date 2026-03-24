@@ -16,21 +16,21 @@ _UINT_COUNT_TABLES: set[str] = {
     "itemuseinfo",
     "terrainregionautospawninfo",
     "textguideinfo",
-    "validscheduleactioninfo",
+    "validscheduleaction",
     "stageinfo",
     "questinfo",
     "gimmickeventtableinfo",
-    "fieldreviveinfo",
+    "reviepointinfo",  # fieldreviveinfo I think?
     "aidialogstringinfo",
     "dialogsetinfo",
     "vibratepatterninfo",
     "platformachievementinfo",
     "levelgimmicksceneobjectinfo",
     "fieldlevelnametableinfo",
-    "gamelevelinfo",
-    "boardinfo",
-    "gameplaytriggerinfo",
-    "characterchangeinfo",
+    "levelinfo",
+    "board",
+    "gameplaytrigger",
+    "characterchange",
     "materialrelationinfo",
 }
 
@@ -39,6 +39,7 @@ _UINT_COUNT_TABLES: set[str] = {
 class BinaryGameHeader:  # not actually sure if this is the correct name
     FILE_EXTENSION: ClassVar[str] = ".pabgh"
 
+    _key_size: int
     value_offsets: dict[int, int]
 
     def __init__(self, reader: EndianedReaderIOBase, count_size: int = 2):
@@ -53,20 +54,25 @@ class BinaryGameHeader:  # not actually sure if this is the correct name
         file_size = reader.tell()
 
         total_key_size = file_size - (count_size + count * 4)
-        key_size = total_key_size // count
-        assert (key_size * count) == total_key_size, "failed to determine key size"
+        self._key_size = total_key_size // count
+        assert (self._key_size * count) == total_key_size, (
+            "failed to determine key size"
+        )
 
         reader.seek(count_size)
 
         for _ in range(count):
-            key = int.from_bytes(reader.read_bytes(key_size), "little")
+            key = int.from_bytes(reader.read_bytes(self._key_size), "little")
             offset = reader.read_u32()
             self.value_offsets[key] = offset
 
     @classmethod
     def from_file(cls, path: Path):
-        filename = path.name.rsplit(".", 1)[0].lower()
-        count_size = 4 if filename in _UINT_COUNT_TABLES else 2
-
         with EndianedFileIO(path, "rb") as f:
-            return cls(f, count_size)
+            return cls.from_reader(f, path)
+
+    @classmethod
+    def from_reader(cls, reader: EndianedReaderIOBase, path: Path):
+        filename = path.name.rsplit(".", 1)[0].lower()
+        count_size = 4 if (filename in _UINT_COUNT_TABLES) else 2
+        return cls(reader, count_size)
