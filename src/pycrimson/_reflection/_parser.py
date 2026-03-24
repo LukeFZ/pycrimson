@@ -8,7 +8,7 @@ from ._types import (
     ReflectionHeader,
     ReflectionType,
     ReflectionObjectInfo,
-    ReflectionOptional,
+    ReflectionSharedString,
     ReflectionProperty,
     ReflectionPropertyType,
     TransferInstructionFlags,
@@ -26,7 +26,7 @@ class ReflectionParser:
     _types: list[ReflectionType]
     _object_names: list[str]
     _object_infos: list[ReflectionObjectInfo]
-    _opt_entries: list[ReflectionOptional]
+    _shared_strings: dict[int, str]
 
     objects: list[dict]
 
@@ -35,7 +35,8 @@ class ReflectionParser:
     def __init__(
         self,
         reader: EndianedReaderIOBase,
-        has_opt_entry: bool = False,
+        has_shared_strings: bool = False,
+        *,
         enable_debug_logging: bool = False,
     ):
         self._enable_debug_logging = enable_debug_logging
@@ -43,6 +44,8 @@ class ReflectionParser:
         self._reader = reader
         self._base_reader_offset = reader.tell()
         self._header = ReflectionHeader.read_from(reader)
+        if self._enable_debug_logging:
+            print("header:", self._header)
 
         context = SerializationContext(
             settings={
@@ -62,14 +65,16 @@ class ReflectionParser:
             else []
         )
 
-        self._opt_entries = (
-            [
-                ReflectionOptional.read_from(reader, context)
+        self._shared_strings = {}
+        if has_shared_strings:
+            for entry in [
+                ReflectionSharedString.read_from(reader, context)
                 for _ in range(reader.read_u32())
-            ]
-            if has_opt_entry
-            else []
-        )
+            ]:
+                self._shared_strings[entry.index] = entry.data
+
+            if has_shared_strings and self._enable_debug_logging:
+                print("shared strings:", self._shared_strings)
 
         object_count = reader.read_u32()
 
@@ -77,26 +82,33 @@ class ReflectionParser:
         if self._enable_debug_logging:
             print("end offset:", end_offset)
 
+        self.objects = []
         if self._header.metadata_version >= 3:
             self._object_infos = [
                 ReflectionObjectInfo.read_from(reader, context)
                 for _ in range(object_count)
             ]
+
+            for i, obj in enumerate(self._object_infos):
+                absolute_object_offset = obj.offset + self._base_reader_offset
+                assert reader.tell() == absolute_object_offset, (
+                    f"{hex(reader.tell())} vs. {hex(absolute_object_offset)}"
+                )
+
+                if self._enable_debug_logging:
+                    print("parsing obj at idx", i)
+
+                parsed_obj = self._parse_object(*self._read_object_metadata(i, False))
+                self.objects.append(parsed_obj)
         else:
-            assert False, "todo: parsing without explicit object infos"
+            for i in range(object_count):
+                if self._enable_debug_logging:
+                    print("parsing obj at idx", i)
 
-        self.objects = []
-        for i, obj in enumerate(self._object_infos):
-            absolute_object_offset = obj.offset + self._base_reader_offset
-            assert reader.tell() == absolute_object_offset, (
-                f"{hex(reader.tell())} vs. {hex(absolute_object_offset)}"
-            )
-
-            if self._enable_debug_logging:
-                print("parsing obj at idx", i)
-
-            parsed_obj = self._parse_object(*self._read_object_metadata(i, False))
-            self.objects.append(parsed_obj)
+                parsed_obj = self._parse_object(
+                    *self._read_object_metadata(None, False)
+                )
+                self.objects.append(parsed_obj)
 
     def print_all_types(self):
         for type in self._types:
@@ -113,6 +125,7 @@ class ReflectionParser:
         has_metadata: bool,
         object_name: str | None,
     ) -> dict:
+        object_start_offset = self._reader.tell()
         if self._enable_debug_logging:
             print(
                 f"parsing object @ {hex(self._reader.tell())} '{f'{object_name or ""}'}' : {type_info.name} ({bitmap})"
@@ -174,9 +187,14 @@ class ReflectionParser:
             obj[property.name] = self._parse_property(property)
 
         if has_metadata:
+            object_end_offset = self._reader.tell()
             object_size = self._reader.read_u32()
             if self._enable_debug_logging:
                 print("reported object size:", object_size)
+
+            assert object_end_offset == (object_start_offset + object_size), (
+                "object size mismatch"
+            )
 
         return obj
 
@@ -187,13 +205,17 @@ class ReflectionParser:
             and self._reader.read_u8() == 1
         ):
             return []
-
         match property.type:
             case ReflectionPropertyType.DEFAULT:
                 return _converters.get_converted_value(
                     property.type_name, self._reader.read_bytes(property.fixed_size)
                 )
             case ReflectionPropertyType.SIZE_PREFIXED:
+                if len(self._shared_strings) > 0:
+                    idx = self._reader.read_i32()
+                    if idx != -1:
+                        return self._shared_strings[idx]
+
                 return _converters.get_converted_value(
                     property.type_name, self._reader.read_bytes(self._reader.read_u32())
                 )
@@ -268,15 +290,24 @@ class ReflectionParser:
 
                 return value
             case ReflectionPropertyType.SIZE_PREFIXED_ARRAY:
-                [
-                    _converters.get_converted_value(
-                        property.type_name,
-                        self._reader.read_bytes(
-                            self._reader.read_u32() * property.fixed_size
-                        ),
+                array_count = self._reader.read_u32()
+                value = []
+
+                for _ in range(array_count):
+                    if len(self._shared_strings) > 0:
+                        idx = self._reader.read_i32()
+                        if idx != -1:
+                            value.append(self._shared_strings[idx])
+                            continue
+
+                    value.append(
+                        _converters.get_converted_value(
+                            property.type_name,
+                            self._reader.read_bytes(
+                                self._reader.read_u32() * property.fixed_size
+                            ),
+                        )
                     )
-                    for _ in range(self._reader.read_u32())
-                ]
             case _:
                 assert False, property
 
@@ -284,13 +315,13 @@ class ReflectionParser:
         self, index: int | None, has_object_name_index: bool
     ) -> tuple[bytes, ReflectionType, bool, str | None]:
         type_index = 0
-        if index is None or self._header.metadata_version < 3:
-            has_metadata = True
-        else:
+        has_metadata = True
+
+        if self._header.metadata_version >= 3 and index is not None:
             obj_meta = self._object_infos[index]
             type_index = obj_meta.type_index
-            self._reader.seek(self._base_reader_offset + obj_meta.offset)
             has_metadata = False
+            self._reader.seek(self._base_reader_offset + obj_meta.offset)
 
         object_property_bitmap = self._reader.read_bytes(self._reader.read_u16())
         object_name = None
@@ -336,6 +367,12 @@ class ReflectionParser:
         )
 
     @classmethod
-    def from_file(cls, path: Path, enable_debug_logging: bool = False):
+    def from_file(
+        cls,
+        path: Path,
+        has_shared_strings: bool = False,
+        *,
+        enable_debug_logging: bool = False,
+    ):
         with EndianedFileIO(path, "rb") as f:
-            return cls(f, enable_debug_logging=enable_debug_logging)
+            return cls(f, has_shared_strings, enable_debug_logging=enable_debug_logging)

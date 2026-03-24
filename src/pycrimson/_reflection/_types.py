@@ -75,6 +75,8 @@ class ReflectionPropertyType(u16, Enum):
     OPTIONAL_OBJECT = 5
     OBJECT_ARRAY = 6
     OBJECT_PTR_ARRAY = 7
+    UNKNOWN_8 = 8  # This is specified in some asset but never deserialized
+    UNKNOWN_9 = 9  # assuming this is UNKNOWN_8_ARRAY
     SIZE_PREFIXED_ARRAY = 10
 
     def is_array_type(self):
@@ -82,6 +84,7 @@ class ReflectionPropertyType(u16, Enum):
             ReflectionPropertyType.SIMPLE_ARRAY,
             ReflectionPropertyType.OBJECT_ARRAY,
             ReflectionPropertyType.OBJECT_PTR_ARRAY,
+            ReflectionPropertyType.UNKNOWN_9,
             ReflectionPropertyType.SIZE_PREFIXED_ARRAY,
         ]
 
@@ -139,6 +142,6 @@ class ReflectionHeader(BinarySerializable):
 
 
 @dataclass(frozen=True)
-class ReflectionOptional(BinarySerializable):
-    unknown0: u32
-    data: custom[bytes, prefixed_length[u32]]
+class ReflectionSharedString(BinarySerializable):
+    index: u32
+    data: custom[str, prefixed_length[u32]]

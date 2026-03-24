@@ -215,7 +215,9 @@ def parse_serialized_file(
     if output_path is None:
         output_path = serialized_path.with_suffix(".json")
 
-    parsed = ReflectionParser.from_file(serialized_path, enable_debug_logging)
+    parsed = ReflectionParser.from_file(
+        serialized_path, enable_debug_logging=enable_debug_logging
+    )
     with output_path.open("w") as f:
         json.dump(parsed.objects, f, indent=1)
 
