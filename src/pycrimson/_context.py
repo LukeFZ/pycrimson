@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 import lz4.block
 
@@ -11,6 +12,18 @@ from ._files import (
 )
 
 from . import _crypto, _dds
+
+
+@dataclass(frozen=True, slots=True)
+class PackEntry:
+    path: str
+    shard: str
+    crypto: PackMetaFileCrypto
+    compression: PackMetaFileCompression
+    is_partial: bool
+    uncompressed_size: int
+    compressed_size: int
+    chunk_id: int
 
 
 class PackageContext:
@@ -137,6 +150,21 @@ class PackageContext:
 
         return output_data
 
+    def iter_entries(self):
+        for group_id, pack in self._packs.items():
+            for dir_path, entries in pack.directories.items():
+                for file_name, file_entry in entries.items():
+                    yield PackEntry(
+                        path=f"{dir_path}/{file_name}",
+                        shard=group_id,
+                        crypto=file_entry.flags.crypto,
+                        compression=file_entry.flags.compression,
+                        is_partial=file_entry.flags.is_partial,
+                        uncompressed_size=file_entry.uncompressed_size,
+                        compressed_size=file_entry.compressed_size,
+                        chunk_id=file_entry.chunk_id,
+                    )
+
     def get_file(self, path: str) -> bytes | None:
         group_id, encrypt_info, entry = self._get_entry_by_path(path)
         # print(group_id, entry)
@@ -184,5 +212,6 @@ class PackageContext:
 
 
 __all__ = [
+    "PackEntry",
     "PackageContext",
 ]

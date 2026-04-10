@@ -12,11 +12,10 @@ from rich import traceback
 
 from bier.EndianedBinaryIO import EndianedBytesIO
 
-from ._context import PackageContext
+from ._context import PackEntry, PackageContext
 from ._files import (
     PackMetaFileCrypto,
     PackMetaFileCompression,
-    PackMetaFile,
     SaveFile,
 )
 from ._reflection import ReflectionParser
@@ -29,82 +28,75 @@ traceback.install(console=_error_console)
 def _extract_all_files(
     ctx: PackageContext,
     output_path: Path,
-    filter: Callable[[str, PackMetaFile], bool] | None = None,
+    filter: Callable[[PackEntry], bool] | None = None,
 ):
     output_path.mkdir(parents=True, exist_ok=True)
 
-    all_entries: list[tuple[str, PackMetaFile]] = []
-    for x in ctx._packs.values():
-        for dir_path, y in x.directories.items():
-            any_matched = False
+    all_entries = list(ctx.iter_entries())
+    if filter is not None:
+        all_entries = [entry for entry in all_entries if filter(entry)]
 
-            for file_name, file_entry in y.items():
-                full_path = f"{dir_path}/{file_name}"
-                if filter is not None and not filter(full_path, file_entry):
-                    continue
-
-                any_matched = True
-                all_entries.append((full_path, file_entry))
-
-            if any_matched:
-                (output_path / dir_path).mkdir(parents=True, exist_ok=True)
-
-    for path, _ in tqdm.tqdm(all_entries):
+    for entry in tqdm.tqdm(all_entries):
+        path = entry.path
         file_output_path = output_path / path
         if file_output_path.exists():
             continue
 
+        file_output_path.parent.mkdir(parents=True, exist_ok=True)
         data = ctx.get_file(path)
         assert data is not None
         file_output_path.write_bytes(data)
 
 
-def _list_all_files(ctx: PackageContext):
-    for group_id, pack in ctx._packs.items():
-        for dir_name, dir in pack.directories.items():
-            for file_name, file in dir.items():
-                crypt_status = (
-                    "encrypted"
-                    if file.flags.crypto != PackMetaFileCrypto.NONE
-                    else "unencrypted"
-                )
-                compress_status = (
-                    "compressed"
-                    if file.flags.compression != PackMetaFileCompression.NONE
-                    else "uncompressed"
-                )
-                if file.flags.is_partial:
-                    compress_status = "partially compressed"
+def _pack_entry_to_json_obj(entry: PackEntry) -> dict[str, str | int | bool]:
+    return {
+        "path": entry.path,
+        "shard": entry.shard,
+        "crypto": entry.crypto.name,
+        "compression": entry.compression.name,
+        "is_partial": entry.is_partial,
+        "uncompressed_size": entry.uncompressed_size,
+        "compressed_size": entry.compressed_size,
+        "chunk_id": entry.chunk_id,
+    }
 
-                print(
-                    f"{group_id} | {dir_name}/{file_name} ({crypt_status}, {compress_status})"
-                )
+
+def _list_all_files(ctx: PackageContext, output_format: str = "text"):
+    if output_format == "jsonl":
+        for entry in ctx.iter_entries():
+            print(json.dumps(_pack_entry_to_json_obj(entry)))
+        return
+
+    if output_format != "text":
+        raise ValueError(f"unsupported output format: {output_format}")
+
+    for entry in ctx.iter_entries():
+        crypt_status = (
+            "encrypted" if entry.crypto != PackMetaFileCrypto.NONE else "unencrypted"
+        )
+        compress_status = (
+            "compressed"
+            if entry.compression != PackMetaFileCompression.NONE
+            else "uncompressed"
+        )
+        if entry.is_partial:
+            compress_status = "partially compressed"
+
+        print(f"{entry.shard} | {entry.path} ({crypt_status}, {compress_status})")
 
 
 def _extract_prefabs(
     ctx: PackageContext, output_path: Path, write_to_disk: bool, overwrite: bool
 ):
-    all_entries: list[tuple[str, PackMetaFile]] = []
-    for x in ctx._packs.values():
-        for dir_path, y in x.directories.items():
-            any_matched = False
+    all_entries = [entry for entry in ctx.iter_entries() if entry.path.endswith(".prefab")]
 
-            for file_name, file_entry in y.items():
-                full_path = f"{dir_path}/{file_name}"
-                if not file_name.endswith(".prefab"):
-                    continue
-
-                any_matched = True
-                all_entries.append((full_path, file_entry))
-
-            if any_matched:
-                (output_path / dir_path).mkdir(parents=True, exist_ok=True)
-
-    for path, _ in tqdm.tqdm(all_entries):
+    for entry in tqdm.tqdm(all_entries):
+        path = entry.path
         file_output_path = output_path / (path + ".json")
         if overwrite and file_output_path.exists():
             continue
 
+        file_output_path.parent.mkdir(parents=True, exist_ok=True)
         data = ctx.get_file(path)
         assert data is not None
 
@@ -147,11 +139,12 @@ def extract_pack_files(
             with cache_path.open("wb") as f:
                 pickle.dump(context, f)
 
-    def _filter(path: str, entry: PackMetaFile):
+    def _filter(entry: PackEntry):
+        path = entry.path
         if only_extension is not None and not path.endswith(only_extension):
             return False
 
-        if only_encrypted and entry.flags.crypto == PackMetaFileCrypto.NONE:
+        if only_encrypted and entry.crypto == PackMetaFileCrypto.NONE:
             return False
 
         if only_folder is not None and not path.startswith(only_folder):
@@ -167,9 +160,10 @@ def list_pack_files(
     pack_path: Annotated[
         Path, Parameter(validator=validators.Path(exists=True, file_okay=False))
     ],
+    output_format: str = "text",
 ):
     context = PackageContext(pack_path)
-    _list_all_files(context)
+    _list_all_files(context, output_format=output_format)
 
 
 @app.command
