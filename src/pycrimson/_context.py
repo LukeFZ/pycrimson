@@ -18,6 +18,7 @@ class PackageContext:
     _packs: dict[str, PackMeta]
     _paz_handle_cache: dict
     _pack_group_whitelist: list[str] | None
+    _pthc: PackTextureHeaderCollection | None
 
     def __init__(
         self, base_directory: Path, pack_group_whitelist: list[str] | None = None
@@ -26,14 +27,18 @@ class PackageContext:
         self._packs = {}
         self._paz_handle_cache = {}
         self._pack_group_whitelist = pack_group_whitelist
+        self._pthc = None
 
         self._parse_pack_meta()
-        self._parse_texture_header_collection()
 
-    def _parse_texture_header_collection(self):
+    def _get_texture_header_collection(self) -> PackTextureHeaderCollection | None:
+        if self._pthc is not None:
+            return self._pthc
+
         pthc_file = self._base_path / "meta" / "0.pathc"
         if pthc_file.exists():
             self._pthc = PackTextureHeaderCollection.from_file(pthc_file)
+        return self._pthc
 
     def _parse_pack_meta(self):
         papgt_file = self._base_path / "meta" / "0.papgt"
@@ -177,7 +182,9 @@ class PackageContext:
             and is_dds_file
             and entry.compressed_size != entry.uncompressed_size
         ):
-            header = self._pthc.get_file_header(path)
+            pthc = self._get_texture_header_collection()
+            assert pthc is not None
+            header = pthc.get_file_header(path)
             data = self._handle_partial_texture(data, header)
 
         return data
