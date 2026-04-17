@@ -90,9 +90,8 @@ class PackTextureHeaderCollection:
             return cls(f)
 
     def get_file_header(self, path: str) -> bytes:
-        checksum = _crypto.calculate_checksum(
-            f"/{path}" if not path.startswith("/") else path
-        )
+        normalized_path = f"/{path}" if not path.startswith("/") else path
+        checksum = _crypto.calculate_checksum(normalized_path)
 
         entry = self._entries.get(checksum)
         assert entry is not None
@@ -101,7 +100,7 @@ class PackTextureHeaderCollection:
             header = self._headers[entry.texture_header_index]
             compressed_block_infos = entry.compressed_block_infos
         else:
-            collision_entry = self._hash_collision_entries.get(path)
+            collision_entry = self._hash_collision_entries.get(normalized_path)
             assert collision_entry is not None
 
             header = self._headers[collision_entry.texture_header_index]
